@@ -1,5 +1,6 @@
 {
   "files.associations": {
-    "babble_communication.h": "c"
+    "babble_communication.h": "c",
+    "babble_types.h": "c"
   }
 }

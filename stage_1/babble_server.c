@@ -12,13 +12,13 @@
 #include <pthread.h>
 
 #include "babble_server.h"
+#include "babble_config.h"
 #include "babble_types.h"
 #include "babble_utils.h"
 #include "babble_communication.h"
 #include "babble_server_answer.h"
 #include "fastrand.h"
 
-#define MAX_CLIENTS 10
 #define MAX_COMMANDS 10
 
 /* to activate random delays in the processing of messages */
@@ -136,7 +136,7 @@ static int process_command(command_t *cmd, answer_t **answer)
 }
 
 // Init thread tables
-pthread_t comm_threads[MAX_CLIENTS];
+pthread_t comm_threads[MAX_CLIENT];
 pthread_t executor_thread;
 
 // Buffer counters
@@ -241,6 +241,7 @@ void *communication_thread_routine(void *arg)
 
 void *executor_thread_routine(void *arg)
 {
+    fastRandomSetSeed(time(NULL) + pthread_self() * 100);
     command_t *cmd;
     answer_t *answer;
 
@@ -317,7 +318,7 @@ int main(int argc, char *argv[])
     printf("Babble server bound to port %d\n", portno);
 
     /* seed for the per-thread random number generator */
-    fastRandomSetSeed(time(NULL) + pthread_self() * 100);
+    /* fastRandomSetSeed(time(NULL) + pthread_self() * 100); */
 
     int client_index = 0;
 
@@ -338,7 +339,7 @@ int main(int argc, char *argv[])
             close(newsockfd); // if thread creation fails --> close socket
             continue;
         }
-        client_index = (client_index + 1) % MAX_CLIENTS; // Update client index
+        client_index = (client_index + 1) % MAX_CLIENT; // Update client index
     }
 
     // cleanup
