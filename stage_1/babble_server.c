@@ -10,6 +10,7 @@
 #include <time.h>
 #include <assert.h>
 #include <pthread.h>
+#include <signal.h>
 
 #include "babble_server.h"
 #include "babble_config.h"
@@ -21,8 +22,8 @@
 
 #define MAX_COMMANDS 10
 
-/* to activate random delays in the processing of messages */
 int random_delay_activated;
+volatile sig_atomic_t server_running = 1; // server shutdown
 
 static void display_help(char *exec)
 {
@@ -151,10 +152,6 @@ pthread_mutex_t buffer_mutex;
 pthread_cond_t buffer_not_empty;
 pthread_cond_t buffer_not_full;
 
-// pthread_rwlock_t reg_table_lock; // Dedicated reader-writer lock, must check later -->  NOT WORKING
-
-pthread_mutex_t reg_table_lock;
-
 void *communication_thread_routine(void *arg)
 {
     int newsockfd = *(int *)arg;
@@ -170,12 +167,14 @@ void *communication_thread_routine(void *arg)
     {
         fprintf(stderr, "Client disconnected or recv error\n");
         close(newsockfd);
+        free(arg);
         pthread_exit(NULL);
     }
     if (recv_size < 0)
     {
         fprintf(stderr, "Error -- recv from client\n");
         close(newsockfd);
+        free(arg);
         pthread_exit(NULL);
     }
     cmd = new_command(0);
@@ -183,6 +182,7 @@ void *communication_thread_routine(void *arg)
     {
         close(newsockfd);
         free(cmd);
+        free(arg);
         pthread_exit(NULL);
     }
     cmd->sock = newsockfd;
@@ -191,6 +191,7 @@ void *communication_thread_routine(void *arg)
     {
         close(newsockfd);
         free(cmd);
+        free(arg);
         pthread_exit(NULL);
     }
     send_answer_to_client(answer);
@@ -216,9 +217,14 @@ void *communication_thread_routine(void *arg)
         else
         {
             pthread_mutex_lock(&buffer_mutex);
-            while (buffer_count == MAX_COMMANDS)
+            while (buffer_count == MAX_COMMANDS && server_running)
             {
                 pthread_cond_wait(&buffer_not_full, &buffer_mutex);
+            }
+            if (!server_running)
+            {
+                pthread_mutex_unlock(&buffer_mutex);
+                break;
             }
             command_buffer[buffer_in] = *cmd;
             buffer_in = (buffer_in + 1) % MAX_COMMANDS;
@@ -236,7 +242,8 @@ void *communication_thread_routine(void *arg)
     process_command(cmd, &answer);
     free(cmd);
     close(newsockfd);
-    //pthread_exit(NULL);
+    free(arg);
+    pthread_exit(NULL);
 }
 
 void *executor_thread_routine(void *arg)
@@ -245,12 +252,17 @@ void *executor_thread_routine(void *arg)
     command_t *cmd;
     answer_t *answer;
 
-    while (1)
+    while (server_running)
     {
         pthread_mutex_lock(&buffer_mutex);
-        while (buffer_count == 0)
+        while (buffer_count == 0 && server_running)
         {
             pthread_cond_wait(&buffer_not_empty, &buffer_mutex);
+        }
+        if (!server_running)
+        {
+            pthread_mutex_unlock(&buffer_mutex);
+            break;
         }
         cmd = &command_buffer[buffer_out];
         buffer_out = (buffer_out + 1) % MAX_COMMANDS;
@@ -262,6 +274,7 @@ void *executor_thread_routine(void *arg)
         send_answer_to_client(answer);
         free_answer(answer);
     }
+    pthread_exit(NULL);
 }
 
 int main(int argc, char *argv[])
@@ -301,7 +314,6 @@ int main(int argc, char *argv[])
     pthread_mutex_init(&buffer_mutex, NULL);
     pthread_cond_init(&buffer_not_empty, NULL);
     pthread_cond_init(&buffer_not_full, NULL);
-    pthread_mutex_init(&reg_table_lock, NULL);
 
     // Executor thread
     if (pthread_create(&executor_thread, NULL, executor_thread_routine, NULL) != 0)
@@ -317,20 +329,25 @@ int main(int argc, char *argv[])
 
     printf("Babble server bound to port %d\n", portno);
 
-    /* seed for the per-thread random number generator */
-    /* fastRandomSetSeed(time(NULL) + pthread_self() * 100); */
-
     int client_index = 0;
 
     // Main server loop
-    while (1)
+    while (server_running)
     {
-        // a malloc to a new sockfd everytime
         int *newsockfd = malloc(sizeof(int));
         *newsockfd = server_connection_accept(sockfd); // new client
         if (*newsockfd < 0)
         {
             fprintf(stderr, "Error -- server accept\n");
+            free(newsockfd);
+            continue;
+        }
+
+        if (client_index >= MAX_CLIENT)
+        {
+            fprintf(stderr, "Error -- max client limit reached\n");
+            close(*newsockfd);
+            free(newsockfd);
             continue;
         }
 
@@ -339,8 +356,10 @@ int main(int argc, char *argv[])
         {
             fprintf(stderr, "Error -- unable to create communication thread\n");
             close(*newsockfd); // if thread creation fails --> close socket
+            free(newsockfd);
             continue;
         }
+        pthread_detach(comm_threads[client_index]);
         client_index = (client_index + 1) % MAX_CLIENT; // Update client index
     }
 
@@ -349,7 +368,6 @@ int main(int argc, char *argv[])
     pthread_mutex_destroy(&buffer_mutex);
     pthread_cond_destroy(&buffer_not_empty);
     pthread_cond_destroy(&buffer_not_full);
-    pthread_mutex_destroy(&reg_table_lock);
 
     return 0;
 }
