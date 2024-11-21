@@ -20,7 +20,7 @@
 #include "babble_server_answer.h"
 #include "fastrand.h"
 
-#define MAX_COMMANDS 10
+#define MAX_COMMANDS 1000
 
 int random_delay_activated;
 volatile sig_atomic_t server_running = 1; // server shutdown

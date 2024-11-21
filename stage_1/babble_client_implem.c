@@ -14,19 +14,18 @@
 
 void *recv_one_msg(int sock)
 {
-    unsigned int *nb_items = NULL;
+    unsigned int *nb_items;
     int recv_bytes = 0;
 
     if ((recv_bytes = network_recv(sock, (void **)&nb_items)) != sizeof(unsigned int))
     {
         fprintf(stderr, "ERROR in msg reception -- expected msg size -- received %d bytes\n", recv_bytes);
-        free(nb_items); // Free memory in case of error
         return NULL;
     }
 
     if (*nb_items != 1)
     {
-        fprintf(stderr, "ERROR in msg reception -- a single msg expected -- %d announced\n", *nb_items);
+        fprintf(stderr, "ERROR in msg reception -- a single msg expected -- %d annouced\n", *nb_items);
         free(nb_items);
         return NULL;
     }
@@ -45,7 +44,7 @@ void *recv_one_msg(int sock)
 
 int recv_timeline_msg_and_print(int sock, int silent)
 {
-    unsigned int *buf1 = NULL;
+    unsigned int *buf1;
     unsigned int nb_items = 0;
     unsigned int timeline_size = 0;
     int recv_bytes = 0;
@@ -53,7 +52,6 @@ int recv_timeline_msg_and_print(int sock, int silent)
     if ((recv_bytes = network_recv(sock, (void **)&buf1)) != sizeof(unsigned int))
     {
         fprintf(stderr, "ERROR in msg reception -- expected msg size -- received %d bytes\n", recv_bytes);
-        free(buf1);
         return -1;
     }
     nb_items = *buf1;
@@ -63,7 +61,6 @@ int recv_timeline_msg_and_print(int sock, int silent)
     if ((recv_bytes = network_recv(sock, (void **)&buf1)) != sizeof(unsigned int))
     {
         fprintf(stderr, "ERROR in msg reception -- expected timeline size -- received %d bytes\n", recv_bytes);
-        free(buf1);
         return -1;
     }
     timeline_size = *buf1;
@@ -78,8 +75,6 @@ int recv_timeline_msg_and_print(int sock, int silent)
 
         if (network_recv(sock, (void **)&publi) == -1)
         {
-            fprintf(stderr, "ERROR in receiving timeline publication\n");
-            free(publi); // Ensure memory is freed on error
             return -1;
         }
 
@@ -89,6 +84,7 @@ int recv_timeline_msg_and_print(int sock, int silent)
         }
 
         free(publi);
+
         nb_items--;
     }
 
@@ -105,16 +101,23 @@ int connect_to_server(char *host, int port)
         return -1;
     }
 
+    /* connecting to the server */
+    /*printf("Babble client connects to %s:%d\n", host, port);*/
+
     struct addrinfo hints, *results, *raddr;
+    int res = 0;
     memset(&hints, 0, sizeof(struct addrinfo));
     char s_port[64];
-    snprintf(s_port, sizeof(s_port), "%d", port);
+
+    sprintf(s_port, "%d", port);
 
     hints.ai_family = AF_INET;
 
-    if (getaddrinfo(host, s_port, &hints, &results))
+    res = getaddrinfo(host, s_port, &hints, &results);
+
+    if (res)
     {
-        perror("getaddrinfo failed");
+        perror("getaddrinfo");
         close(sockfd);
         return -1;
     }
@@ -132,15 +135,16 @@ int connect_to_server(char *host, int port)
     if (raddr == NULL)
     { /* No address succeeded */
         fprintf(stderr, "Could not connect\n");
-        close(sockfd);
         return -1;
     }
 
-    /* set socket option to manage client disconnection */
-    struct linger sl = {1, 0};
+    /* set socker option to manage client disconnection */
+    struct linger sl;
+    sl.l_onoff = 1;  /* non-zero value enables linger option in kernel */
+    sl.l_linger = 0; /* timeout interval in seconds */
     if (setsockopt(sockfd, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl)) < 0)
     {
-        perror("setsockopt failed");
+        perror("setsockopt failed\n");
         close(sockfd);
         return -1;
     }
@@ -151,15 +155,16 @@ int connect_to_server(char *host, int port)
 unsigned long client_login(int sock, char *id)
 {
     char buffer[BABBLE_BUFFER_SIZE];
-    memset(buffer, 0, sizeof(buffer));
+    memset(buffer, 0, BABBLE_BUFFER_SIZE);
 
     if (strlen(id) > BABBLE_ID_SIZE)
     {
         fprintf(stderr, "Error -- invalid client id (too long): %s\n", id);
+        fprintf(stderr, "Max id size is %d\n", BABBLE_ID_SIZE);
         return 0;
     }
 
-    snprintf(buffer, sizeof(buffer), "%d %s\n", LOGIN, id);
+    snprintf(buffer, BABBLE_BUFFER_SIZE, "%d %s\n", LOGIN, id);
 
     if (network_send(sock, strlen(buffer) + 1, buffer) != strlen(buffer) + 1)
     {
@@ -168,13 +173,16 @@ unsigned long client_login(int sock, char *id)
     }
 
     char *login_ack = recv_one_msg(sock);
-    if (!login_ack)
+
+    if (login_ack == NULL)
     {
         close(sock);
         return 0;
     }
 
+    /* parsing the answer to get the key */
     unsigned long key = parse_login_ack(login_ack);
+
     free(login_ack);
 
     return key;
@@ -183,15 +191,23 @@ unsigned long client_login(int sock, char *id)
 int client_follow(int sock, char *id, int with_streaming)
 {
     char buffer[BABBLE_BUFFER_SIZE];
-    memset(buffer, 0, sizeof(buffer));
+    memset(buffer, 0, BABBLE_BUFFER_SIZE);
 
     if (strlen(id) > BABBLE_ID_SIZE)
     {
         fprintf(stderr, "Error -- invalid client id (too long): %s\n", id);
+        fprintf(stderr, "Max id size is %d\n", BABBLE_ID_SIZE);
         return -1;
     }
 
-    snprintf(buffer, sizeof(buffer), with_streaming ? "S %d %s\n" : "%d %s\n", FOLLOW, id);
+    if (with_streaming)
+    {
+        snprintf(buffer, BABBLE_BUFFER_SIZE, "S %d %s\n", FOLLOW, id);
+    }
+    else
+    {
+        snprintf(buffer, BABBLE_BUFFER_SIZE, "%d %s\n", FOLLOW, id);
+    }
 
     if (network_send(sock, strlen(buffer) + 1, buffer) != strlen(buffer) + 1)
     {
@@ -202,19 +218,23 @@ int client_follow(int sock, char *id, int with_streaming)
     if (!with_streaming)
     {
         char *ack = recv_one_msg(sock);
-        if (!ack)
+
+        if (ack == NULL)
         {
             fprintf(stderr, "ERROR in FOLLOW ack\n");
             close(sock);
             return -1;
         }
 
-        if (strstr(ack, "follow") == NULL)
+        /* check if answer is ok */
+        if (strstr(ack, "follow") != NULL)
         {
             free(ack);
-            return -1;
+            return 0;
         }
+
         free(ack);
+        return -1;
     }
     else
     {
@@ -227,7 +247,9 @@ int client_follow(int sock, char *id, int with_streaming)
 int client_follow_count(int sock)
 {
     char buffer[BABBLE_BUFFER_SIZE];
-    snprintf(buffer, sizeof(buffer), "%d\n", FOLLOW_COUNT);
+    memset(buffer, 0, BABBLE_BUFFER_SIZE);
+
+    snprintf(buffer, BABBLE_BUFFER_SIZE, "%d\n", FOLLOW_COUNT);
 
     if (network_send(sock, strlen(buffer) + 1, buffer) != strlen(buffer) + 1)
     {
@@ -236,14 +258,17 @@ int client_follow_count(int sock)
     }
 
     char *count_ack = recv_one_msg(sock);
-    if (!count_ack)
+
+    if (count_ack == NULL)
     {
-        fprintf(stderr, "ERROR on FOLLOW_COUNT ack\n");
+        fprintf(stderr, "ERROR on FOLLOW_COUNT ack");
         close(sock);
-        return -1;
+        return 0;
     }
 
+    /* parsing the answer to get the key */
     int count = parse_fcount_ack(count_ack);
+
     free(count_ack);
 
     return count;
@@ -252,15 +277,23 @@ int client_follow_count(int sock)
 int client_publish(int sock, char *msg, int with_streaming)
 {
     char buffer[BABBLE_BUFFER_SIZE];
-    memset(buffer, 0, sizeof(buffer));
+    memset(buffer, 0, BABBLE_BUFFER_SIZE);
 
     if (strlen(msg) > BABBLE_PUBLICATION_SIZE)
     {
         fprintf(stderr, "Error -- invalid msg (too long): %s\n", msg);
+        fprintf(stderr, "Max msg size is %d\n", BABBLE_PUBLICATION_SIZE);
         return -1;
     }
 
-    snprintf(buffer, sizeof(buffer), with_streaming ? "S %d %s\n" : "%d %s\n", PUBLISH, msg);
+    if (with_streaming)
+    {
+        snprintf(buffer, BABBLE_BUFFER_SIZE, "S %d %s\n", PUBLISH, msg);
+    }
+    else
+    {
+        snprintf(buffer, BABBLE_BUFFER_SIZE, "%d %s\n", PUBLISH, msg);
+    }
 
     if (network_send(sock, strlen(buffer) + 1, buffer) != strlen(buffer) + 1)
     {
@@ -271,19 +304,23 @@ int client_publish(int sock, char *msg, int with_streaming)
     if (!with_streaming)
     {
         char *ack = recv_one_msg(sock);
-        if (!ack)
+
+        if (ack == NULL)
         {
             fprintf(stderr, "ERROR in PUBLISH ack\n");
             close(sock);
             return -1;
         }
 
-        if (strstr(ack, "{") == NULL)
+        /* check if answer is ok */
+        if (strstr(ack, "{") != NULL)
         {
             free(ack);
-            return -1;
+            return 0;
         }
+
         free(ack);
+        return -1;
     }
     else
     {
@@ -293,10 +330,15 @@ int client_publish(int sock, char *msg, int with_streaming)
     return 0;
 }
 
+/* return the size of the timeline */
+/* if silent is set, do not print the timeline on the screen
+ * return -1 in case of error */
 int client_timeline(int sock, int silent)
 {
     char buffer[BABBLE_BUFFER_SIZE];
-    snprintf(buffer, sizeof(buffer), "%d\n", TIMELINE);
+    memset(buffer, 0, BABBLE_BUFFER_SIZE);
+
+    snprintf(buffer, BABBLE_BUFFER_SIZE, "%d\n", TIMELINE);
 
     if (network_send(sock, strlen(buffer) + 1, buffer) != strlen(buffer) + 1)
     {
@@ -304,13 +346,23 @@ int client_timeline(int sock, int silent)
         return -1;
     }
 
-    return recv_timeline_msg_and_print(sock, silent);
+    int total_items = recv_timeline_msg_and_print(sock, silent);
+
+    if (total_items < 0)
+    {
+        fprintf(stderr, "Error in timeline message\n");
+        return -1;
+    }
+
+    return total_items;
 }
 
 int client_rdv(int sock)
 {
     char buffer[BABBLE_BUFFER_SIZE];
-    snprintf(buffer, sizeof(buffer), "%d\n", RDV);
+    memset(buffer, 0, BABBLE_BUFFER_SIZE);
+
+    snprintf(buffer, BABBLE_BUFFER_SIZE, "%d\n", RDV);
 
     if (network_send(sock, strlen(buffer) + 1, buffer) != strlen(buffer) + 1)
     {
@@ -319,19 +371,21 @@ int client_rdv(int sock)
     }
 
     char *ack = recv_one_msg(sock);
-    if (!ack)
+
+    if (ack == NULL)
     {
-        fprintf(stderr, "ERROR in RDV ack\n");
+        fprintf(stderr, "ERROR in RDV ack");
         close(sock);
         return -1;
     }
 
-    if (strstr(ack, "rdv_ack") == NULL)
+    /* check if answer is ok */
+    if (strstr(ack, "rdv_ack") != NULL)
     {
         free(ack);
-        return -1;
+        return 0;
     }
-    free(ack);
 
-    return 0;
+    free(ack);
+    return -1;
 }
