@@ -91,7 +91,7 @@ static int parse_command(char *str, command_t *cmd)
 }
 
 /* processes the command and eventually generates an answer */
-static int process_command(command_t *cmd, answer_t **answer)
+int process_command(command_t *cmd, answer_t **answer)
 {
     int res = 0;
 
@@ -120,7 +120,7 @@ static int process_command(command_t *cmd, answer_t **answer)
         break;
     case UNREGISTER:
         res = unregisted_client(cmd);
-        *answer = NULL;
+        *answer = NULL; // No answer needed
         break;
     default:
         fprintf(stderr, "Error -- Unknown command id\n");
@@ -151,6 +151,11 @@ command_t command_buffer[MAX_COMMANDS]; // Command buffer (Producer-Consumer)
 pthread_mutex_t buffer_mutex;
 pthread_cond_t buffer_not_empty;
 pthread_cond_t buffer_not_full;
+
+int is_streaming_command(int cmd_id)
+{
+    return (cmd_id == PUBLISH || cmd_id == FOLLOW);
+}
 
 void *communication_thread_routine(void *arg)
 {
@@ -224,7 +229,8 @@ void *communication_thread_routine(void *arg)
             if (!server_running)
             {
                 pthread_mutex_unlock(&buffer_mutex);
-                break;
+                // break;
+                pthread_exit(NULL);
             }
             command_buffer[buffer_in] = *cmd;
             buffer_in = (buffer_in + 1) % MAX_COMMANDS;
@@ -249,8 +255,6 @@ void *communication_thread_routine(void *arg)
 void *executor_thread_routine(void *arg)
 {
     fastRandomSetSeed(time(NULL) + pthread_self() * 100);
-    command_t *cmd;
-    answer_t *answer;
 
     while (server_running)
     {
@@ -262,17 +266,23 @@ void *executor_thread_routine(void *arg)
         if (!server_running)
         {
             pthread_mutex_unlock(&buffer_mutex);
-            break;
+            // break;
+            pthread_exit(NULL);
         }
-        cmd = &command_buffer[buffer_out];
+        command_t *cmd = &command_buffer[buffer_out];
         buffer_out = (buffer_out + 1) % MAX_COMMANDS;
         buffer_count--;
+
         pthread_cond_signal(&buffer_not_full);
         pthread_mutex_unlock(&buffer_mutex);
 
+        answer_t *answer;
         process_command(cmd, &answer);
-        send_answer_to_client(answer);
-        free_answer(answer);
+        if (answer != NULL)
+        {
+            send_answer_to_client(answer);
+            free_answer(answer);
+        }
     }
     pthread_exit(NULL);
 }
