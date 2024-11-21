@@ -236,7 +236,7 @@ void *communication_thread_routine(void *arg)
     process_command(cmd, &answer);
     free(cmd);
     close(newsockfd);
-    pthread_exit(NULL);
+    //pthread_exit(NULL);
 }
 
 void *executor_thread_routine(void *arg)
@@ -257,16 +257,16 @@ void *executor_thread_routine(void *arg)
         buffer_count--;
         pthread_cond_signal(&buffer_not_full);
         pthread_mutex_unlock(&buffer_mutex);
+
         process_command(cmd, &answer);
         send_answer_to_client(answer);
         free_answer(answer);
     }
-    pthread_exit(NULL);
 }
 
 int main(int argc, char *argv[])
 {
-    int sockfd, newsockfd;
+    int sockfd;
     int portno = BABBLE_PORT;
 
     int opt;
@@ -325,18 +325,20 @@ int main(int argc, char *argv[])
     // Main server loop
     while (1)
     {
-        newsockfd = server_connection_accept(sockfd); // new client
-        if (newsockfd < 0)
+        // a malloc to a new sockfd everytime
+        int *newsockfd = malloc(sizeof(int));
+        *newsockfd = server_connection_accept(sockfd); // new client
+        if (*newsockfd < 0)
         {
             fprintf(stderr, "Error -- server accept\n");
             continue;
         }
 
         // Create a new communication thread for each client
-        if (pthread_create(&comm_threads[client_index], NULL, communication_thread_routine, &newsockfd) != 0)
+        if (pthread_create(&comm_threads[client_index], NULL, communication_thread_routine, newsockfd) != 0)
         {
             fprintf(stderr, "Error -- unable to create communication thread\n");
-            close(newsockfd); // if thread creation fails --> close socket
+            close(*newsockfd); // if thread creation fails --> close socket
             continue;
         }
         client_index = (client_index + 1) % MAX_CLIENT; // Update client index

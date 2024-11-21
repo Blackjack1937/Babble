@@ -138,6 +138,7 @@ static int process_command(command_t *cmd, answer_t **answer)
 // Init thread tables
 pthread_t comm_threads[MAX_CLIENT];
 pthread_t executor_threads[BABBLE_EXECUTOR_THREADS];
+// pthread_t executor_thread;
 
 // Buffer counters
 int buffer_in = 0;
@@ -152,8 +153,7 @@ pthread_cond_t buffer_not_empty;
 pthread_cond_t buffer_not_full;
 
 // pthread_rwlock_t reg_table_lock; // Dedicated reader-writer lock, must check later -->  NOT WORKING
-
-pthread_mutex_t reg_table_lock;
+// pthread_mutex_t reg_table_lock;
 
 void *communication_thread_routine(void *arg)
 {
@@ -236,7 +236,7 @@ void *communication_thread_routine(void *arg)
     process_command(cmd, &answer);
     free(cmd);
     close(newsockfd);
-    pthread_exit(NULL);
+    //pthread_exit(NULL);
 }
 
 void *executor_thread_routine(void *arg)
@@ -257,16 +257,26 @@ void *executor_thread_routine(void *arg)
         buffer_count--;
         pthread_cond_signal(&buffer_not_full);
         pthread_mutex_unlock(&buffer_mutex);
+
         process_command(cmd, &answer);
         send_answer_to_client(answer);
         free_answer(answer);
     }
-    pthread_exit(NULL);
+}
+
+void *threads_queue_init(void){
+    for(int i=0; i < BABBLE_EXECUTOR_THREADS; i++){
+        if(pthread_create(&executor_threads[i], NULL, executor_thread_routine, NULL) != 0)
+         {
+            fprintf(stderr, "Error -- unable to create executor thread\n");
+            return NULL;
+        }
+    }
 }
 
 int main(int argc, char *argv[])
 {
-    int sockfd, newsockfd;
+    int sockfd;
     int portno = BABBLE_PORT;
 
     int opt;
@@ -301,16 +311,14 @@ int main(int argc, char *argv[])
     pthread_mutex_init(&buffer_mutex, NULL);
     pthread_cond_init(&buffer_not_empty, NULL);
     pthread_cond_init(&buffer_not_full, NULL);
-    pthread_mutex_init(&reg_table_lock, NULL);
 
-    // Multiple Executor threads
-    // for loop to create execution threads
-
-    if (pthread_create(&executor_threads[i], NULL, executor_thread_routine, NULL) != 0)
-    {
-        fprintf(stderr, "Error -- unable to create executor thread\n");
-        return -1;
-    }
+    // Executor thread
+    // if (pthread_create(&executor_thread, NULL, executor_thread_routine, NULL) != 0)
+    // {
+    //     fprintf(stderr, "Error -- unable to create executor thread\n");
+    //     return -1;
+    // }
+    threads_queue_init();
 
     if ((sockfd = server_connection_init(portno)) == -1)
     {
@@ -327,18 +335,20 @@ int main(int argc, char *argv[])
     // Main server loop
     while (1)
     {
-        newsockfd = server_connection_accept(sockfd); // new client
-        if (newsockfd < 0)
+        // a malloc to a new sockfd everytime
+        int *newsockfd = malloc(sizeof(int));
+        *newsockfd = server_connection_accept(sockfd); // new client
+        if (*newsockfd < 0)
         {
             fprintf(stderr, "Error -- server accept\n");
             continue;
         }
 
         // Create a new communication thread for each client
-        if (pthread_create(&comm_threads[client_index], NULL, communication_thread_routine, &newsockfd) != 0)
+        if (pthread_create(&comm_threads[client_index], NULL, communication_thread_routine, newsockfd) != 0)
         {
             fprintf(stderr, "Error -- unable to create communication thread\n");
-            close(newsockfd); // if thread creation fails --> close socket
+            close(*newsockfd); // if thread creation fails --> close socket
             continue;
         }
         client_index = (client_index + 1) % MAX_CLIENT; // Update client index
@@ -349,7 +359,6 @@ int main(int argc, char *argv[])
     pthread_mutex_destroy(&buffer_mutex);
     pthread_cond_destroy(&buffer_not_empty);
     pthread_cond_destroy(&buffer_not_full);
-    pthread_mutex_destroy(&reg_table_lock);
 
     return 0;
 }

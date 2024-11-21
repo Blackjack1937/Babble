@@ -36,7 +36,7 @@ static void *publish_thread (void *arg)
     char client_name[BABBLE_ID_SIZE];
     memset(client_name, 0, BABBLE_ID_SIZE);
     snprintf(client_name, BABBLE_ID_SIZE, "PUB");
-    
+
     int sockfd = connect_to_server(hostname, portno);
 
     if(sockfd == -1){
@@ -46,7 +46,7 @@ static void *publish_thread (void *arg)
     }
 
     unsigned long client_key= client_login(sockfd, client_name);
-    
+
     if(client_key == 0){
         fprintf(stderr,"*** Test Failed ***\n");
         fprintf(stderr,"PUB failed to login\n");

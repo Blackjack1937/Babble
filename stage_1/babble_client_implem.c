@@ -153,7 +153,7 @@ unsigned long client_login(int sock, char* id)
         fprintf(stderr,"Max id size is %d\n", BABBLE_ID_SIZE);
         return 0;
     }
-    
+
     snprintf(buffer, BABBLE_BUFFER_SIZE, "%d %s\n", LOGIN, id);
 
     
