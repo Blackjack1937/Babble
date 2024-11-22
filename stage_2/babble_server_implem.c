@@ -248,6 +248,7 @@ int run_publish_command(command_t *cmd, answer_t **answer)
     }
 
     pthread_mutex_lock(&timeline_lock);
+
     for(i=0; i<client->nb_followers; i++){
         if(!client->followers[i]->disconnected){
             date = timeline_insert(client->followers[i]->timeline, client, cmd->msg);
@@ -256,7 +257,9 @@ int run_publish_command(command_t *cmd, answer_t **answer)
             client_disconnected = 1;
         }
     }
-    
+    pthread_mutex_unlock(&timeline_lock);
+
+    pthread_mutex_lock(&follower_lock);
     /* removing disconnected clients from the list of followers */
     if(client_disconnected){
         for(i=0; i<client->nb_followers; i++){
@@ -271,8 +274,7 @@ int run_publish_command(command_t *cmd, answer_t **answer)
             }
         }
     }
-
-    pthread_mutex_unlock(&timeline_lock);
+    pthread_mutex_unlock(&follower_lock);
 
     if(cmd->answer_expected){
         the_answer = alloc_answer(client->key);
