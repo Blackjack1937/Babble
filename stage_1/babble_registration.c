@@ -18,6 +18,12 @@ void registration_init(void)
 
 client_bundle_t *registration_lookup(unsigned long key)
 {
+    if (key == 0) // safeguard against invalid key
+    {
+        fprintf(stderr, "Error -- invalid key lookup\n");
+        return NULL;
+    }
+
     // locking the reader lock
     pthread_rwlock_rdlock(&registration_table_lock);
     int i = 0;
@@ -25,7 +31,7 @@ client_bundle_t *registration_lookup(unsigned long key)
 
     for (i = 0; i < nb_registered_clients; i++)
     {
-        if (registration_table[i]->key == key)
+        if (registration_table[i] != NULL && registration_table[i]->key == key)
         {
             c = registration_table[i];
             break;
@@ -58,22 +64,18 @@ int registration_insert(client_bundle_t *cl)
 
     for (i = 0; i < nb_registered_clients; i++)
     {
-        if (registration_table[i]->key == cl->key)
+        if (registration_table[i] != NULL && registration_table[i]->key == cl->key)
         {
-            break;
+            // Replace old client entry
+            fprintf(stderr, "Warning: Replacing existing client entry for id %ld\n", cl->key);
+            registration_table[i] = cl;
+            pthread_rwlock_unlock(&registration_table_lock);
+            return 0;
         }
     }
 
-    if (i != nb_registered_clients)
-    {
-        fprintf(stderr, "Error -- id % ld already in use\n", cl->key);
-        pthread_rwlock_unlock(&registration_table_lock);
-        return -1;
-    }
-
-    /* insert cl */
-    registration_table[nb_registered_clients] = cl;
-    nb_registered_clients++;
+    // Insert new client
+    registration_table[nb_registered_clients++] = cl;
 
     pthread_rwlock_unlock(&registration_table_lock);
     return 0;
@@ -81,6 +83,12 @@ int registration_insert(client_bundle_t *cl)
 
 client_bundle_t *registration_remove(unsigned long key)
 {
+    if (key == 0) // safeguard against invalid key
+    {
+        fprintf(stderr, "Error -- invalid key for removal\n");
+        return NULL;
+    }
+
     // locking another writer lock
     pthread_rwlock_wrlock(&registration_table_lock);
 
@@ -88,7 +96,7 @@ client_bundle_t *registration_remove(unsigned long key)
 
     for (i = 0; i < nb_registered_clients; i++)
     {
-        if (registration_table[i]->key == key)
+        if (registration_table[i] != NULL && registration_table[i]->key == key)
         {
             break;
         }
@@ -103,6 +111,7 @@ client_bundle_t *registration_remove(unsigned long key)
 
     client_bundle_t *cl = registration_table[i];
 
+    /* Shift clients to fill the gap */
     nb_registered_clients--;
     registration_table[i] = registration_table[nb_registered_clients];
     registration_table[nb_registered_clients] = NULL; // clear dangling pointer

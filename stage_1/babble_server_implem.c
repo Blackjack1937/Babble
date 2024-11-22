@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 
 #include "babble_server.h"
 #include "babble_utils.h"
@@ -14,6 +15,12 @@
 #include "babble_communication.h"
 #include "babble_registration.h"
 #include "babble_timeline.h"
+
+// Declare external variables from babble_server.c
+extern pthread_mutex_t buffer_mutex;
+extern command_t command_buffer[MAX_COMMANDS];
+extern int buffer_out;
+extern int buffer_count;
 
 time_t server_start;
 
@@ -451,6 +458,18 @@ int unregisted_client(command_t *cmd)
         printf("### Unregister client %s (key = %lu)\n", client->client_name, client->key);
         close(client->sock);
         client->disconnected = 1;
+
+        /* Mark commands for this client as invalid */
+        pthread_mutex_lock(&buffer_mutex);
+        for (int i = 0; i < buffer_count; i++)
+        {
+            int index = (buffer_out + i) % MAX_COMMANDS;
+            if (command_buffer[index].key == client->key)
+            {
+                command_buffer[index].cid = -1; // Mark as invalid
+            }
+        }
+        pthread_mutex_unlock(&buffer_mutex);
 
         free_client_data(client);
     }

@@ -20,8 +20,6 @@
 #include "babble_server_answer.h"
 #include "fastrand.h"
 
-#define MAX_COMMANDS 1000
-
 int random_delay_activated;
 volatile sig_atomic_t server_running = 1; // server shutdown
 
@@ -72,11 +70,7 @@ static int parse_command(char *str, command_t *cmd)
         }
         break;
     case TIMELINE:
-        cmd->msg[0] = '\0';
-        break;
     case FOLLOW_COUNT:
-        cmd->msg[0] = '\0';
-        break;
     case RDV:
         cmd->msg[0] = '\0';
         break;
@@ -101,16 +95,12 @@ int process_command(command_t *cmd, answer_t **answer)
         res = run_login_command(cmd, answer);
         break;
     case PUBLISH:
-        random_delay(random_delay_activated);
-        res = run_publish_command(cmd, answer);
-        break;
     case FOLLOW:
-        random_delay(random_delay_activated);
-        res = run_follow_command(cmd, answer);
-        break;
     case TIMELINE:
         random_delay(random_delay_activated);
-        res = run_timeline_command(cmd, answer);
+        res = (cmd->cid == PUBLISH)  ? run_publish_command(cmd, answer)
+              : (cmd->cid == FOLLOW) ? run_follow_command(cmd, answer)
+                                     : run_timeline_command(cmd, answer);
         break;
     case FOLLOW_COUNT:
         res = run_fcount_command(cmd, answer);
@@ -209,8 +199,6 @@ void *communication_thread_routine(void *arg)
     // main loop to handle commands
     while ((recv_size = network_recv(newsockfd, (void **)&recv_buff)) > 0)
     {
-        printf("Received command string: %s\n", recv_buff); // debugging
-
         cmd = new_command(client_key);
         if (parse_command(recv_buff, cmd) == -1)
         {
@@ -229,7 +217,6 @@ void *communication_thread_routine(void *arg)
             if (!server_running)
             {
                 pthread_mutex_unlock(&buffer_mutex);
-                // break;
                 pthread_exit(NULL);
             }
             command_buffer[buffer_in] = *cmd;
@@ -242,7 +229,7 @@ void *communication_thread_routine(void *arg)
         free(recv_buff);
     }
 
-    // client unregistration
+    // Client unregistration
     cmd = new_command(client_key);
     cmd->cid = UNREGISTER;
     process_command(cmd, &answer);
@@ -266,7 +253,6 @@ void *executor_thread_routine(void *arg)
         if (!server_running)
         {
             pthread_mutex_unlock(&buffer_mutex);
-            // break;
             pthread_exit(NULL);
         }
         command_t *cmd = &command_buffer[buffer_out];
@@ -276,7 +262,14 @@ void *executor_thread_routine(void *arg)
         pthread_cond_signal(&buffer_not_full);
         pthread_mutex_unlock(&buffer_mutex);
 
-        answer_t *answer;
+        // check for UNREGISTER command and handle it directly
+        if (cmd->cid == UNREGISTER)
+        {
+            process_command(cmd, NULL); // process the unregistration
+            continue;                   // skip further processing for this command
+        }
+
+        answer_t *answer = NULL;
         process_command(cmd, &answer);
         if (answer != NULL)
         {
@@ -325,7 +318,6 @@ int main(int argc, char *argv[])
     pthread_cond_init(&buffer_not_empty, NULL);
     pthread_cond_init(&buffer_not_full, NULL);
 
-    // Executor thread
     if (pthread_create(&executor_thread, NULL, executor_thread_routine, NULL) != 0)
     {
         fprintf(stderr, "Error -- unable to create executor thread\n");
@@ -341,11 +333,10 @@ int main(int argc, char *argv[])
 
     int client_index = 0;
 
-    // Main server loop
     while (server_running)
     {
         int *newsockfd = malloc(sizeof(int));
-        *newsockfd = server_connection_accept(sockfd); // new client
+        *newsockfd = server_connection_accept(sockfd);
         if (*newsockfd < 0)
         {
             fprintf(stderr, "Error -- server accept\n");
@@ -361,19 +352,17 @@ int main(int argc, char *argv[])
             continue;
         }
 
-        // Create a new communication thread for each client
         if (pthread_create(&comm_threads[client_index], NULL, communication_thread_routine, newsockfd) != 0)
         {
             fprintf(stderr, "Error -- unable to create communication thread\n");
-            close(*newsockfd); // if thread creation fails --> close socket
+            close(*newsockfd);
             free(newsockfd);
             continue;
         }
         pthread_detach(comm_threads[client_index]);
-        client_index = (client_index + 1) % MAX_CLIENT; // Update client index
+        client_index = (client_index + 1) % MAX_CLIENT;
     }
 
-    // cleanup
     close(sockfd);
     pthread_mutex_destroy(&buffer_mutex);
     pthread_cond_destroy(&buffer_not_empty);
