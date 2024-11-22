@@ -2,6 +2,7 @@
 #define __BABBLE_TYPES_H__
 
 #include <time.h>
+#include <pthread.h>
 
 #include "babble_config.h"
 
@@ -40,5 +41,11 @@ typedef struct client_bundle{
 
 } client_bundle_t;
 
+/* Forward more types for RDV treating */
+
+typedef struct client_cmd {
+    unsigned long pending_cmd; // count of pending commands per client
+    pthread_mutex_t lock; // mutex that we will use to synchronize access to this var
+} client_cmd_t;
 
 #endif

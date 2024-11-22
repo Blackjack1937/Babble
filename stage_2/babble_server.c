@@ -146,6 +146,7 @@ int buffer_out = 0;
 int buffer_count = 0;
 
 command_t command_buffer[MAX_COMMANDS]; // Command buffer (Producer-Consumer)
+client_cmd_t client_cmds[MAX_CLIENT]; //array for storing the cmds count of each client
 
 // Mutual exclusion mechanisms
 pthread_mutex_t buffer_mutex;
@@ -274,6 +275,23 @@ void *threads_queue_init(void){
     }
 }
 
+//initialize the array of client command
+void init_client_cmds(void){
+    for(int i = 0; i < MAX_CLIENT; i++){
+        client_cmds[i].pending_cmd = 0;
+        pthread_mutex_init(&client_cmds[i].lock, NULL);
+    }
+}
+
+//retrieve the client nbr of pending cmds
+client_cmd_t *get_client_cmd(unsigned long key){
+    if( key >= MAX_CLIENT){
+        fprintf(stderr, "Error -- client key out of bound\n");
+        return NULL;
+    }
+    return &client_cmds[key];
+}
+
 int main(int argc, char *argv[])
 {
     int sockfd;
@@ -307,7 +325,10 @@ int main(int argc, char *argv[])
         display_help(argv[0]);
         return -1;
     }
+    
     server_data_init();
+    init_client_cmds();
+
     pthread_mutex_init(&buffer_mutex, NULL);
     pthread_cond_init(&buffer_not_empty, NULL);
     pthread_cond_init(&buffer_not_full, NULL);

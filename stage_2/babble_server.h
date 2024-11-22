@@ -13,6 +13,7 @@ extern time_t server_start;
 void server_data_init(void);
 int server_connection_init(int port);
 int server_connection_accept(int sock);
+void init_client_cmds(void);
 
 /* new object */
 command_t* new_command(unsigned long key);
@@ -38,5 +39,8 @@ int write_to_client(unsigned long key, int size, void* buf);
 
 /* get client name from client key */
 char* get_name_from_key(unsigned long key);
+
+/* get client cmds state from key */
+client_cmd_t *get_client_cmd(unsigned long key);
 
 #endif

@@ -228,6 +228,7 @@ int run_login_command(command_t *cmd, answer_t **answer)
 //Client-data concurrency locks
 pthread_mutex_t timeline_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t follower_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t rdv_lock = PTHREAD_MUTEX_INITIALIZER;
 
 int run_publish_command(command_t *cmd, answer_t **answer)
 {
@@ -411,8 +412,11 @@ int run_fcount_command(command_t *cmd, answer_t **answer)
 */
 int run_rdv_command(command_t *cmd, answer_t **answer)
 {
-    answer_t *the_answer=NULL;
-    char* msg_buffer=NULL;
+    //Checking we got the right command
+    if(cmd->cid != RDV){
+        fprintf(stderr, "Error -- invalid command type for RDV\n");
+        return -1;
+    }
 
     /* lookup client */
     client_bundle_t *client = registration_lookup(cmd->key);
@@ -422,11 +426,49 @@ int run_rdv_command(command_t *cmd, answer_t **answer)
         generate_cmd_error(cmd, answer);
         return -1;
     }
+
+    /* Looking up the client's cmds so far using the client key */
+    client_cmd_t *client_cmd = get_client_cmd(cmd->key);
+    if(client_cmd == NULL) {
+        fprintf(stderr, "Error -- client not found with given key\n");
+        generate_cmd_error(cmd, answer);
+        return -1;
+    }
+
+    /* Waiting for all commands to complete here */
+    pthread_mutex_lock(&client_cmd->lock);
+    while(client_cmd->pending_cmd > 0){
+        pthread_mutex_unlock(&client_cmd->lock);
+        usleep(100); //Avoiding busy waiting so sleeping a bit
+        pthread_mutex_lock(&client_cmd->lock);
+    }
+    
+
+    answer_t *the_answer=NULL;
+    char* msg_buffer=NULL;
+
+    // Increment pending commands to block other incoming commands
+    client_cmd->pending_cmd++;
+    pthread_mutex_unlock(&client_cmd->lock);
     
     /* generate answer to client */
     the_answer = alloc_answer(client->key);
+    if(the_answer == NULL){
+        fprintf(stderr, "Error -- Memory allocation for answer failed\n");
+        pthread_mutex_lock(&client_cmd->lock);
+        client_cmd->pending_cmd--;
+        pthread_mutex_unlock(&client_cmd->lock);
+        return -1;
+    }
 
     msg_buffer = malloc(BABBLE_BUFFER_SIZE);
+    if(msg_buffer == NULL){
+        fprintf(stderr, "Error -- Memory allocation for message buffer failed\n");
+        pthread_mutex_lock(&client_cmd->lock);
+        client_cmd->pending_cmd--;
+        pthread_mutex_unlock(&client_cmd->lock);
+        return -1;
+    }
 
     snprintf(msg_buffer, BABBLE_BUFFER_SIZE,"%s[%ld]: rdv_ack\n", client->client_name, time(NULL) - server_start);
     
@@ -436,6 +478,10 @@ int run_rdv_command(command_t *cmd, answer_t **answer)
 
     *answer = the_answer;
 
+    /* Mark the rdv as complete */
+    pthread_mutex_lock(&client_cmd->lock);
+    client_cmd->pending_cmd--;
+    pthread_mutex_unlock(&client_cmd->lock);
     return 0;
 }
 
