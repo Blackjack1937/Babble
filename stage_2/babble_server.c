@@ -311,13 +311,9 @@ int main(int argc, char *argv[])
     pthread_mutex_init(&buffer_mutex, NULL);
     pthread_cond_init(&buffer_not_empty, NULL);
     pthread_cond_init(&buffer_not_full, NULL);
+    // pthread_mutex_init(&reg_table_lock, NULL);
 
     // Executor thread
-    // if (pthread_create(&executor_thread, NULL, executor_thread_routine, NULL) != 0)
-    // {
-    //     fprintf(stderr, "Error -- unable to create executor thread\n");
-    //     return -1;
-    // }
     threads_queue_init();
 
     if ((sockfd = server_connection_init(portno)) == -1)
@@ -359,6 +355,7 @@ int main(int argc, char *argv[])
     pthread_mutex_destroy(&buffer_mutex);
     pthread_cond_destroy(&buffer_not_empty);
     pthread_cond_destroy(&buffer_not_full);
+    // pthread_mutex_destroy(&reg_table_lock);
 
     return 0;
 }

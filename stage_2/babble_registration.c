@@ -6,16 +6,7 @@
 
 client_bundle_t *registration_table[MAX_CLIENT];
 int nb_registered_clients;
-
-/* Forward synchronization implementation*/
-/* Variables */
-pthread_mutex_t registration_table_mutex;
-pthread_cond_t readers_turn;
-pthread_cond_t writers_turn;
-/* Counters */
-int active_readers = 0;
-int active_writers = 0;
-int wait_writers = 0;
+pthread_rwlock_t registration_table_lock;
 
 
 void registration_init(void)
@@ -23,71 +14,13 @@ void registration_init(void)
     nb_registered_clients=0;
 
     memset(registration_table, 0, MAX_CLIENT * sizeof(client_bundle_t*));
-    
-    pthread_mutex_init(&registration_table_mutex, NULL);
-    pthread_cond_init(&readers_turn, NULL);
-    pthread_cond_init(&writers_turn, NULL);
-}
-
-/* Forward lock and unlock functions for synchronization */
-void reader_mutex_lock(void){
-    pthread_mutex_lock(&registration_table_mutex);
-
-    //wait if there are active or waiting writers
-    while(wait_writers > 0 || active_writers > 0){
-        pthread_cond_wait(&readers_turn, & registration_table_mutex);
-    }
-    active_readers++;
-    pthread_mutex_unlock(&registration_table_mutex);
-}
-
-void reader_mutex_unlock(void){
-    pthread_mutex_lock(&registration_table_mutex);
-    active_readers--;
-    if(active_readers == 0){
-        pthread_cond_signal(&writers_turn);
-    }
-    pthread_mutex_unlock(&registration_table_mutex);
-}
-
-void writer_mutext_lock(void){
-
-    pthread_mutex_lock(&registration_table_mutex);
-
-    wait_writers++;
-
-    //wait if no active readers or writers
-    while(active_readers>0 || active_writers>0){
-        pthread_cond_wait(&writers_turn, &registration_table_mutex);
-    }
-
-    wait_writers--;
-    active_writers++;
-
-    pthread_mutex_unlock(&registration_table_mutex);
-}
-
-void writer_mutext_unlock(void){
-    
-    pthread_mutex_lock(&registration_table_mutex);
-
-    active_writers--;
-
-    // let waiting writers write before readers read
-    if(wait_writers > 0){
-        pthread_cond_signal(&writers_turn);
-    } else {
-        pthread_cond_broadcast(&readers_turn);
-    }
-    pthread_mutex_unlock(&registration_table_mutex);
-
+    pthread_rwlock_init(&registration_table_lock, NULL);
 }
 
 client_bundle_t* registration_lookup(unsigned long key)
 {
     //locking the reader lock
-    reader_mutex_lock();
-
+    pthread_rwlock_rdlock(&registration_table_lock);
     int i=0;
     client_bundle_t *c = NULL;
 
@@ -97,20 +30,20 @@ client_bundle_t* registration_lookup(unsigned long key)
             break;
         }
     }
-
-    reader_mutex_unlock();
+    pthread_rwlock_unlock(&registration_table_lock);
     return c;
 }
 
 int registration_insert(client_bundle_t* cl)
 {    
+    printf("BBBBEEEFFFFOOOOOOORRRRREEEEEE RRRRRREEEEEGGGGGGIIIIIISSSSTTTTERRRRRIINNNNGGGG \n");
     
     //locking the writer lock
-    writer_mutext_lock();
+    pthread_rwlock_wrlock(&registration_table_lock);
 
     if(nb_registered_clients == MAX_CLIENT){
         fprintf(stderr, "ERROR: MAX NUMBER OF CLIENTS REACHED\n");
-        writer_mutext_unlock();
+        pthread_rwlock_unlock(&registration_table_lock);
         return -1;
     }
     
@@ -126,8 +59,8 @@ int registration_insert(client_bundle_t* cl)
     
     
     if(i != nb_registered_clients){
-        writer_mutext_unlock();
         fprintf(stderr, "Error -- id % ld already in use\n", cl->key);
+        pthread_rwlock_unlock(&registration_table_lock);
         return -1;
     }
 
@@ -135,7 +68,7 @@ int registration_insert(client_bundle_t* cl)
     registration_table[nb_registered_clients]=cl;
     nb_registered_clients++;
 
-    writer_mutext_unlock();
+    pthread_rwlock_unlock(&registration_table_lock);
     return 0;
 }
 
@@ -143,7 +76,7 @@ int registration_insert(client_bundle_t* cl)
 client_bundle_t* registration_remove(unsigned long key)
 {
     //locking another writer lock
-    writer_mutext_lock();
+    pthread_rwlock_wrlock(&registration_table_lock);
     
     int i=0;
     
@@ -155,7 +88,7 @@ client_bundle_t* registration_remove(unsigned long key)
 
     if(i == nb_registered_clients){
         fprintf(stderr, "Error -- no client found\n");
-        writer_mutext_unlock();
+        pthread_rwlock_unlock(&registration_table_lock);
         return NULL;
     }
     
@@ -164,13 +97,11 @@ client_bundle_t* registration_remove(unsigned long key)
     nb_registered_clients--;
     registration_table[i] = registration_table[nb_registered_clients];
 
-    writer_mutext_unlock();
+    pthread_rwlock_unlock(&registration_table_lock);
     return cl;
 }
 
 //maybe don't need? on shutdown or termination  but the whole prograùm will be over so ?
 void registration_lock_destroy(void){
-    pthread_mutex_destroy(&registration_table_mutex);
-    pthread_cond_destroy(&readers_turn);
-    pthread_cond_destroy(&writers_turn);
+    pthread_rwlock_destroy(&registration_table_lock);
 }

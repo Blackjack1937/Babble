@@ -7,7 +7,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <pthread.h>
 
 #include "babble_server.h"
 #include "babble_utils.h"
@@ -273,8 +272,6 @@ int run_publish_command(command_t *cmd, answer_t **answer)
     }
 
     pthread_mutex_unlock(&timeline_lock);
-    
-    //printf("### Client %s published { %s } at date %ld\n", client->client_name, cmd->msg, date);
 
     if(cmd->answer_expected){
         the_answer = alloc_answer(client->key);
@@ -315,7 +312,7 @@ int run_follow_command(command_t *cmd, answer_t **answer)
         generate_cmd_error(cmd, answer);        
         return 0;
     }
-    
+
     pthread_mutex_lock(&follower_lock);
     /* if client is not already followed, add it */
     int i=0;
@@ -405,10 +402,6 @@ int run_fcount_command(command_t *cmd, answer_t **answer)
     return 0;
 }
 
-/*
-    Read operation on the registration table and requires protection, but protection was already implemented in registration table so??
-    Starvation of writers when continuous stream of readers and vice versa but that's in 
-*/
 int run_rdv_command(command_t *cmd, answer_t **answer)
 {
     answer_t *the_answer=NULL;
