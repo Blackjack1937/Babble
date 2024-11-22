@@ -5,22 +5,21 @@
 unsigned long hash(char *str);
 
 /* truncate input string at first line feed (\n), and remove \n */
-void str_clean(char *str);
+void str_clean(char* str);
 
 /* convert input string to babble command id */
-int str_to_command(char *str, int *ack_req);
+int str_to_command(char* str, int* ack_req);
 
 /* copy payload of input into output (copy at most size characters) */
-int str_to_payload(char *input, char *output, int size);
+int str_to_payload(char* input, char* output, int size);
 
 /* extract key from login ack */
-unsigned long parse_login_ack(char *ack_msg);
+unsigned long parse_login_ack(char* ack_msg);
 
 /* extract nb of followers from follow_count msg */
-int parse_fcount_ack(char *ack);
+int parse_fcount_ack(char* ack);
 
 /* generates a delay of random duration */
 void random_delay(int activated);
 
-int select_buffer_index(unsigned long key);
 #endif

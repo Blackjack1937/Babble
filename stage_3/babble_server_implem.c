@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 
 #include "babble_server.h"
 #include "babble_utils.h"
@@ -15,43 +16,11 @@
 #include "babble_registration.h"
 #include "babble_timeline.h"
 
-#include <pthread.h>
-#include "babble_config.h"
-
-#define MAX_COMMANDS 10
-
-typedef struct
-{
-    command_t buffer[MAX_COMMANDS];
-    int buffer_in;
-    int buffer_out;
-    int buffer_count;
-    pthread_mutex_t mutex;
-    pthread_cond_t not_empty;
-    pthread_cond_t not_full;
-} command_buffer_t;
-
-command_buffer_t buffers[BABBLE_PRODCONS_NB]; // Array of buffers
-
-// initialize all buffers
-void init_buffers()
-{
-    for (int i = 0; i < BABBLE_PRODCONS_NB; i++)
-    {
-        buffers[i].buffer_in = 0;
-        buffers[i].buffer_out = 0;
-        buffers[i].buffer_count = 0;
-        pthread_mutex_init(&buffers[i].mutex, NULL);
-        pthread_cond_init(&buffers[i].not_empty, NULL);
-        pthread_cond_init(&buffers[i].not_full, NULL);
-    }
-}
-
-// hash function for buffer selection
-int select_buffer_index(unsigned long key)
-{
-    return key % BABBLE_PRODCONS_NB;
-}
+// Declare external variables from babble_server.c
+extern pthread_mutex_t buffer_mutex;
+extern command_t command_buffer[MAX_COMMANDS];
+extern int buffer_out;
+extern int buffer_count;
 
 time_t server_start;
 
@@ -480,27 +449,31 @@ int run_rdv_command(command_t *cmd, answer_t **answer)
 int unregisted_client(command_t *cmd)
 {
     assert(cmd->cid == UNREGISTER);
-    int buffer_index = select_buffer_index(cmd->key);
-    command_buffer_t *buffer = &buffers[buffer_index];
 
-    pthread_mutex_lock(&buffer->mutex);
-    if (buffer->buffer_count > 0)
-    {
-        // remove the client's command from the buffer
-        command_t *cmd_to_remove = &buffer->buffer[buffer->buffer_out];
-        buffer->buffer_out = (buffer->buffer_out + 1) % MAX_COMMANDS;
-        buffer->buffer_count--;
-        free_command(cmd_to_remove);
-    }
-    pthread_mutex_unlock(&buffer->mutex);
-
+    /* remove client */
     client_bundle_t *client = registration_remove(cmd->key);
+
     if (client != NULL)
     {
         printf("### Unregister client %s (key = %lu)\n", client->client_name, client->key);
         close(client->sock);
         client->disconnected = 1;
+
+        /* Mark commands for this client as invalid */
+        pthread_mutex_lock(&buffer_mutex);
+        for (int i = 0; i < buffer_count; i++)
+        {
+            int index = (buffer_out + i) % MAX_COMMANDS;
+            if (command_buffer[index].key == client->key)
+            {
+                command_buffer[index].cid = -1; // Mark as invalid
+            }
+        }
+        pthread_mutex_unlock(&buffer_mutex);
+
+        free_client_data(client);
     }
+
     return 0;
 }
 

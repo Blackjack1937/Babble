@@ -3,6 +3,7 @@
     "babble_communication.h": "c",
     "babble_types.h": "c",
     "types.h": "c",
-    "errno.h": "c"
+    "errno.h": "c",
+    "string.h": "c"
   }
 }

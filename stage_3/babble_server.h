@@ -39,6 +39,6 @@ int write_to_client(unsigned long key, int size, void *buf);
 /* get client name from client key */
 char *get_name_from_key(unsigned long key);
 
-int select_buffer_index(unsigned long key);
+#define MAX_COMMANDS 1000
 
 #endif
